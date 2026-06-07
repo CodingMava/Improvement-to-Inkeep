@@ -1,0 +1,1405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PulseGuard - Decoupled AI Hallucination Monitor & Sandbox</title>
+    <meta name="description" content="Decoupled real-time AI agent evaluation dashboard. Monitor, audit, and detect silent hallucinations in technical support LLM responses using the Gemini API.">
+    
+    <!-- Premium Google Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Chart.js for beautiful live metrics visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --bg-base: #060913;
+            --bg-grid: rgba(255, 255, 255, 0.02);
+            --glass-bg: rgba(13, 20, 38, 0.6);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-glow: rgba(99, 102, 241, 0.05);
+            
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-dark: #64748b;
+            
+            /* Curated Tailwind-like HSL color system */
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --primary-light: rgba(99, 102, 241, 0.15);
+            
+            --success: #14b8a6;
+            --success-light: rgba(20, 184, 166, 0.1);
+            
+            --warning: #f59e0b;
+            --warning-light: rgba(245, 158, 11, 0.1);
+            
+            --danger: #f43f5e;
+            --danger-light: rgba(244, 63, 94, 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            background-image: 
+                radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.12) 0%, transparent 40%),
+                radial-gradient(circle at 80% 80%, rgba(139, 92, 246, 0.1) 0%, transparent 40%),
+                linear-gradient(rgba(255, 255, 255, 0.007) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.007) 1px, transparent 1px);
+            background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+            color: var(--text-main);
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            min-height: 100vh;
+            padding: 2rem;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* Floating glowing orbs in the background */
+        .orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(120px);
+            z-index: -2;
+            opacity: 0.25;
+            pointer-events: none;
+            animation: floating 25s infinite alternate ease-in-out;
+        }
+        .orb-primary {
+            width: 450px;
+            height: 450px;
+            background: radial-gradient(circle, var(--primary) 0%, transparent 70%);
+            top: -100px;
+            left: -100px;
+        }
+        .orb-secondary {
+            width: 500px;
+            height: 500px;
+            background: radial-gradient(circle, #8b5cf6 0%, transparent 70%);
+            bottom: -150px;
+            right: -100px;
+            animation-delay: -10s;
+        }
+
+        @keyframes floating {
+            0% { transform: translate(0, 0) scale(1); }
+            50% { transform: translate(60px, -40px) scale(1.15); }
+            100% { transform: translate(-30px, 50px) scale(0.9); }
+        }
+
+        .app-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        /* Header Layout */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+            border-bottom: 1px solid var(--glass-border);
+            padding-bottom: 1.5rem;
+        }
+
+        .brand h1 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            letter-spacing: -0.05em;
+            background: linear-gradient(135deg, #a5b4fc 0%, #c084fc 50%, #6366f1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .brand p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-top: 0.25rem;
+        }
+
+        .system-status {
+            background: rgba(20, 184, 166, 0.08);
+            border: 1px solid rgba(20, 184, 166, 0.2);
+            padding: 0.5rem 1rem;
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--success);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--success);
+            box-shadow: 0 0 12px var(--success);
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(20, 184, 166, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(20, 184, 166, 0); }
+        }
+
+        /* Glassmorphism Cards */
+        .glass-card {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        .glass-card:hover {
+            border-color: rgba(255, 255, 255, 0.12);
+            box-shadow: 0 12px 40px 0 rgba(99, 102, 241, 0.08);
+        }
+
+        /* Stats Row grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .stat-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .stat-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .stat-icon.blue { background: rgba(99, 102, 241, 0.1); color: var(--primary); border: 1px solid rgba(99, 102, 241, 0.15); }
+        .stat-icon.teal { background: rgba(20, 184, 166, 0.1); color: var(--success); border: 1px solid rgba(20, 184, 166, 0.15); }
+        .stat-icon.red { background: rgba(244, 63, 94, 0.1); color: var(--danger); border: 1px solid rgba(244, 63, 94, 0.15); }
+        .stat-icon.orange { background: rgba(245, 158, 11, 0.1); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.15); }
+
+        /* Main Dashboard Grid */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.3fr;
+            gap: 2rem;
+            align-items: start;
+        }
+
+        @media (max-width: 1100px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Section Typography */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.25rem;
+        }
+
+        .section-header h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Sandbox & Code Inputs */
+        .sandbox-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        .template-toolbar {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .template-toolbar span {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .template-buttons {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .template-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--glass-border);
+            color: var(--text-muted);
+            padding: 0.4rem 0.8rem;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .template-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-main);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .template-btn.active {
+            background: var(--primary-light);
+            color: #a5b4fc;
+            border-color: rgba(99, 102, 241, 0.4);
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .form-group label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .char-counter {
+            font-size: 0.75rem;
+            color: var(--text-dark);
+        }
+
+        .form-group input, .form-group textarea {
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            color: var(--text-main);
+            padding: 0.75rem;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.9rem;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .form-group input:focus, .form-group textarea:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+            background: rgba(0, 0, 0, 0.5);
+        }
+
+        .form-group textarea.monospace {
+            font-family: 'Fira Code', 'Courier New', monospace;
+            font-size: 0.8rem;
+            line-height: 1.4;
+        }
+
+        /* Primary Action Button with Scanner Glow */
+        .btn-evaluate-wrapper {
+            position: relative;
+            overflow: hidden;
+            border-radius: 10px;
+        }
+
+        .btn-evaluate {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+            color: white;
+            border: none;
+            padding: 0.9rem 1.5rem;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.95rem;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
+            transition: all 0.3s;
+        }
+
+        .btn-evaluate:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 24px rgba(99, 102, 241, 0.4);
+        }
+
+        .btn-evaluate:disabled {
+            background: #1e293b;
+            color: #64748b;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        /* Scan animation line */
+        .scanner-line {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, #c084fc, #818cf8, #22d3ee, transparent);
+            transform: translateY(-3px);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .scanning .scanner-line {
+            animation: scanning-action 2s infinite linear;
+            opacity: 1;
+        }
+
+        @keyframes scanning-action {
+            0% { transform: translateY(-3px); }
+            50% { transform: translateY(180px); }
+            100% { transform: translateY(-3px); }
+        }
+
+        /* Analytics Panel Charts */
+        .charts-row {
+            display: grid;
+            grid-template-columns: 1fr 1.3fr;
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+        }
+
+        @media (max-width: 600px) {
+            .charts-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .chart-box {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            min-height: 220px;
+            position: relative;
+        }
+
+        .chart-box h3 {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            max-height: 180px;
+        }
+
+        /* Live Feed Column */
+        .feed-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+            max-height: 980px;
+        }
+
+        /* Feed Controls (Search & Filters) */
+        .feed-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .search-wrapper {
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            color: var(--text-main);
+            padding: 0.6rem 1rem 0.6rem 2.2rem;
+            font-size: 0.85rem;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .search-input:focus {
+            border-color: var(--primary);
+            background: rgba(0, 0, 0, 0.45);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            pointer-events: none;
+        }
+
+        .filter-tabs {
+            display: flex;
+            gap: 0.25rem;
+            background: rgba(0,0,0,0.3);
+            padding: 0.25rem;
+            border-radius: 8px;
+            border: 1px solid var(--glass-border);
+        }
+
+        .filter-tab {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 0.4rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s;
+        }
+
+        .filter-tab:hover {
+            color: var(--text-main);
+        }
+
+        .filter-tab.active {
+            background: rgba(255, 255, 255, 0.07);
+            color: var(--text-main);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        /* Log Entry Card */
+        .feed-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            padding-right: 0.25rem;
+        }
+
+        /* Custom scrollbar */
+        .feed-list::-webkit-scrollbar {
+            width: 6px;
+        }
+        .feed-list::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .feed-list::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.08);
+            border-radius: 3px;
+        }
+        .feed-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(255,255,255,0.15);
+        }
+
+        .log-card {
+            border: 1px solid var(--glass-border);
+            background: rgba(255, 255, 255, 0.015);
+            border-radius: 12px;
+            overflow: hidden;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+        }
+
+        .log-card:hover {
+            background: rgba(255, 255, 255, 0.03);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .log-card-header {
+            padding: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            user-select: none;
+        }
+
+        .log-card-summary {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .log-id-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            font-family: 'Fira Code', monospace;
+            color: var(--text-dark);
+        }
+
+        .log-query-preview {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--text-main);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 400px;
+        }
+
+        .badge {
+            padding: 0.25rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .badge-verified { background: var(--success-light); color: var(--success); border: 1px solid rgba(20, 184, 166, 0.2); }
+        .badge-review { background: var(--warning-light); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.2); }
+        .badge-flagged { background: var(--danger-light); color: var(--danger); border: 1px solid rgba(244, 63, 94, 0.2); }
+
+        .score-indicator {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 0.25rem;
+            min-width: 70px;
+        }
+
+        .score-num {
+            font-size: 0.95rem;
+            font-weight: 700;
+        }
+
+        .score-bar-mini {
+            width: 60px;
+            height: 3px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 9999px;
+            overflow: hidden;
+        }
+
+        .score-bar-fill {
+            height: 100%;
+            border-radius: 9999px;
+            width: 0;
+            transition: width 0.6s ease-out;
+        }
+
+        /* Expandable Details */
+        .log-card-body {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s cubic-bezier(0, 1, 0, 1); /* Quick slide transition */
+            border-top: 0px solid transparent;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .log-card.expanded .log-card-body {
+            max-height: 1000px; /* arbitrary high value for smooth expansion */
+            border-top: 1px solid var(--glass-border);
+            transition: max-height 0.3s cubic-bezier(1, 0, 1, 0);
+        }
+
+        .log-details-padding {
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            font-size: 0.85rem;
+        }
+
+        .details-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 0.75rem;
+        }
+
+        .detail-section {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .detail-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .detail-box {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--glass-border);
+            border-radius: 6px;
+            padding: 0.75rem;
+            line-height: 1.5;
+            color: var(--text-main);
+            overflow-x: auto;
+        }
+
+        .detail-box.code {
+            font-family: 'Fira Code', 'Courier New', monospace;
+            font-size: 0.8rem;
+            background: #03050a;
+            border-left: 3px solid var(--primary);
+        }
+
+        .detail-box.audited-issue {
+            border-left: 3px solid var(--danger);
+            background: rgba(244, 63, 94, 0.05);
+            color: #fda4af;
+        }
+
+        .detail-box.audited-reasoning {
+            border-left: 3px solid var(--primary);
+            background: rgba(99, 102, 241, 0.05);
+            color: #c7d2fe;
+        }
+
+        /* Alerts & Warnings */
+        .banner-info {
+            background: rgba(99, 102, 241, 0.08);
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            color: #c7d2fe;
+            border-radius: 12px;
+            padding: 0.75rem 1rem;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .banner-warning {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.2);
+            color: #fde047;
+            border-radius: 12px;
+            padding: 0.75rem 1rem;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .empty-state {
+            padding: 3rem 1.5rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .empty-state svg {
+            color: var(--text-dark);
+            width: 48px;
+            height: 48px;
+        }
+
+        .api-badge {
+            font-size: 0.65rem;
+            font-weight: 700;
+            background: rgba(255,255,255,0.06);
+            color: var(--text-muted);
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Glowing Backdrops -->
+    <div class="orb orb-primary"></div>
+    <div class="orb orb-secondary"></div>
+
+    <div class="app-container">
+        
+        <!-- Header -->
+        <header>
+            <div class="brand">
+                <h1>
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color:#a5b4fc;"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    PulseGuard
+                </h1>
+                <p>Decoupled real-time auditor detecting hallucinations in AI support responses</p>
+            </div>
+            <div id="connection-status" class="system-status">
+                <div class="status-dot"></div>
+                <span id="connection-text">Connecting Auditor Engine...</span>
+            </div>
+        </header>
+
+        <!-- Dynamic Warnings (e.g. Missing API Key warning) -->
+        <div id="api-warning" class="banner-warning" style="display: none;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span><strong>Notice:</strong> <code>GEMINI_API_KEY</code> environment variable is missing on your host. Running sandbox in local rule-based heuristic simulation mode.</span>
+        </div>
+
+        <!-- Top Statistics Section -->
+        <section class="stats-grid" aria-label="System Metrics">
+            
+            <!-- Total Queries Evaluated -->
+            <article class="glass-card stat-card">
+                <div class="stat-info">
+                    <span class="stat-label">Total Evaluated</span>
+                    <span id="metric-total" class="stat-value">-</span>
+                </div>
+                <div class="stat-icon blue">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                </div>
+            </article>
+
+            <!-- System Health Rate -->
+            <article class="glass-card stat-card">
+                <div class="stat-info">
+                    <span class="stat-label">System Health</span>
+                    <span id="metric-health" class="stat-value">-%</span>
+                </div>
+                <div class="stat-icon teal">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+                </div>
+            </article>
+
+            <!-- Flagged Hallucinations -->
+            <article class="glass-card stat-card">
+                <div class="stat-info">
+                    <span class="stat-label">Flagged Anomalies</span>
+                    <span id="metric-flagged" class="stat-value">-</span>
+                </div>
+                <div class="stat-icon red">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                </div>
+            </article>
+
+            <!-- Average Accuracy -->
+            <article class="glass-card stat-card">
+                <div class="stat-info">
+                    <span class="stat-label">Avg Accuracy</span>
+                    <span id="metric-accuracy" class="stat-value">-%</span>
+                </div>
+                <div class="stat-icon orange">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="M4.93 4.93l1.41 1.41"/><path d="M17.66 17.66l1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M6.34 17.66l-1.41 1.41"/><path d="M19.07 4.93l-1.41 1.41"/></svg>
+                </div>
+            </article>
+
+        </section>
+
+        <!-- Main Workspace Grid -->
+        <main class="dashboard-grid">
+
+            <!-- Left Column: Injector sandbox & Charts -->
+            <section class="sandbox-panel">
+                
+                <div class="glass-card">
+                    <div class="section-header">
+                        <h2>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--primary);"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                            Live testing sandbox
+                        </h2>
+                        <span class="api-badge">Simulate Ingest</span>
+                    </div>
+
+                    <!-- Quick Preset Templates Toolbar -->
+                    <div class="template-toolbar" style="margin-bottom: 1.25rem;">
+                        <span>Sandbox Templates</span>
+                        <div class="template-buttons">
+                            <button id="tpl-factual" class="template-btn active" onclick="loadTemplate('factual', this)">1. Accurate Response</button>
+                            <button id="tpl-outdated" class="template-btn" onclick="loadTemplate('outdated', this)">2. Outdated Timeout</button>
+                            <button id="tpl-hallucinated" class="template-btn" onclick="loadTemplate('hallucinated', this)">3. Fictional Method</button>
+                        </div>
+                    </div>
+
+                    <!-- Forms -->
+                    <div style="display: flex; flex-direction: column; gap: 1rem;">
+                        <div class="form-group">
+                            <label for="docs">
+                                Ground Truth Documentation
+                                <span class="char-counter" id="docs-count">0 chars</span>
+                            </label>
+                            <textarea id="docs" rows="4" class="monospace" oninput="updateCharCount('docs')">The Inkeep SDK requires Node.js v18+. To initialize the widget, call `InkeepWidget.mount({ apiKey: 'your_key' })`. The default timeout is 30 seconds.</textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="query">
+                                Developer Query
+                                <span class="char-counter" id="query-count">0 chars</span>
+                            </label>
+                            <input type="text" id="query" value="How do I mount the widget and what's the default timeout?" oninput="updateCharCount('query')">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="agent_response">
+                                Simulated Agent Response (Factual / Hallucinated)
+                                <span class="char-counter" id="agent-response-count">0 chars</span>
+                            </label>
+                            <textarea id="agent_response" rows="3" class="monospace" oninput="updateCharCount('agent_response')">To initialize the widget, ensure you are running Node.js v18+, and call InkeepWidget.mount({ apiKey: 'your_key' }). The default timeout for network requests is 30 seconds.</textarea>
+                        </div>
+
+                        <div class="btn-evaluate-wrapper">
+                            <div class="scanner-line"></div>
+                            <button id="run-btn" class="btn-evaluate" onclick="submitEvaluation()">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+                                Run Audit Pipeline
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visual Analytics Panel -->
+                <div class="glass-card">
+                    <div class="section-header" style="margin-bottom: 0.5rem;">
+                        <h2>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--success);"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                            Evaluator Analytics
+                        </h2>
+                    </div>
+                    
+                    <div class="charts-row">
+                        <div class="chart-box">
+                            <h3>Query breakdown</h3>
+                            <div class="canvas-container">
+                                <canvas id="chart-doughnut"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-box">
+                            <h3>Accuracy trends</h3>
+                            <div class="canvas-container">
+                                <canvas id="chart-line"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- Right Column: Audit Logs Live Feed -->
+            <section class="glass-card feed-container">
+                <div class="section-header">
+                    <h2>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--warning);"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        Evaluation Log Feed
+                    </h2>
+                    <span class="api-badge" style="background: rgba(245, 158, 11, 0.08); color: var(--warning); border-color: rgba(245, 158, 11, 0.15)">Real-Time Ingestion</span>
+                </div>
+
+                <div class="feed-controls">
+                    <!-- Dynamic Search Filter -->
+                    <div class="search-wrapper">
+                        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input type="text" id="feed-search" class="search-input" placeholder="Search logs by query or issue description..." oninput="filterLogs()">
+                    </div>
+
+                    <!-- Status Tabs Filter -->
+                    <div class="filter-tabs">
+                        <button id="filter-all" class="filter-tab active" onclick="setFeedFilter('all')">All</button>
+                        <button id="filter-verified" class="filter-tab" onclick="setFeedFilter('verified')">Verified</button>
+                        <button id="filter-review" class="filter-tab" onclick="setFeedFilter('review')">Review</button>
+                        <button id="filter-flagged" class="filter-tab" onclick="setFeedFilter('flagged')">Flagged</button>
+                    </div>
+                </div>
+
+                <!-- Feed Lists -->
+                <div id="feed-list" class="feed-list">
+                    <!-- Populated dynamically via Javascript -->
+                    <div class="empty-state">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <span>No evaluations fetched yet.</span>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Application Script Logic -->
+    <script>
+        const API_HOST = 'http://localhost:5000';
+        let currentFilter = 'all';
+        let evaluations = [];
+        let doughnutChart = null;
+        let lineChart = null;
+
+        // Templates definition
+        const templates = {
+            factual: {
+                docs: "The Inkeep SDK requires Node.js v18+. To initialize the widget, call `InkeepWidget.mount({ apiKey: 'your_key' })`. The default timeout is 30 seconds.",
+                query: "How do I mount the widget and what's the default timeout?",
+                response: "To initialize the widget, ensure you are running Node.js v18+, and call InkeepWidget.mount({ apiKey: 'your_key' }). The default timeout for network requests is 30 seconds."
+            },
+            outdated: {
+                docs: "The Inkeep SDK requires Node.js v18+. To initialize the widget, call `InkeepWidget.mount({ apiKey: 'your_key' })`. The default timeout is 30 seconds.",
+                query: "What timeout should I use for InkeepWidget and what's the default?",
+                response: "The default timeout is 60 seconds, which is standard for the widget, but you can configure it during InkeepWidget.mount()."
+            },
+            hallucinated: {
+                docs: "The Inkeep SDK requires Node.js v18+. To initialize the widget, call `InkeepWidget.mount({ apiKey: 'your_key' })`. The default timeout is 30 seconds.",
+                query: "How do I clean up or close the Inkeep widget session?",
+                response: "You can clean up or close the active session by calling InkeepWidget.destroyAll() or InkeepWidget.cleanup()."
+            }
+        };
+
+        // Initialize App on Page Load
+        window.addEventListener('DOMContentLoaded', async () => {
+            updateCharCount('docs');
+            updateCharCount('query');
+            updateCharCount('agent_response');
+            
+            await checkBackendConnection();
+            await fetchEvaluations();
+            await fetchMetrics();
+        });
+
+        function updateCharCount(id) {
+            const el = document.getElementById(id);
+            const counter = document.getElementById(`${id === 'agent_response' ? 'agent-response' : id}-count`);
+            if (el && counter) {
+                counter.innerText = `${el.value.length} chars`;
+            }
+        }
+
+        // Check flask connectivity and set API mode warnings
+        async function checkBackendConnection() {
+            const statusIndicator = document.getElementById('connection-status');
+            const statusText = document.getElementById('connection-text');
+            const apiWarning = document.getElementById('api-warning');
+
+            try {
+                const response = await fetch(`${API_HOST}/api/metrics`);
+                if (response.ok) {
+                    statusText.innerText = "System Monitor Connected";
+                    statusIndicator.style.background = "rgba(20, 184, 166, 0.08)";
+                    statusIndicator.style.color = "var(--success)";
+                    
+                    // Call backend api key environment check (via mock indicator in evaluations endpoint)
+                    const evalsResponse = await fetch(`${API_HOST}/api/evaluations`);
+                    const evalsData = await evalsResponse.json();
+                    
+                    // Simple check if key is set - backend will set mocked=true if missing
+                    // We can check if any evaluation exists, or test evaluate
+                }
+            } catch (err) {
+                statusText.innerText = "Auditor Offline";
+                statusIndicator.style.background = "rgba(244, 63, 94, 0.08)";
+                statusIndicator.style.color = "var(--danger)";
+                statusIndicator.querySelector('.status-dot').style.backgroundColor = "var(--danger)";
+                statusIndicator.querySelector('.status-dot').style.boxShadow = "0 0 12px var(--danger)";
+                statusIndicator.querySelector('.status-dot').style.animation = "none";
+                console.error("Backend offline: Please start backend.py", err);
+            }
+        }
+
+        // Fetch logs from backend
+        async function fetchEvaluations() {
+            try {
+                const response = await fetch(`${API_HOST}/api/evaluations`);
+                if (!response.ok) throw new Error("API return code: " + response.status);
+                evaluations = await response.json();
+                
+                // Show API warning banner if any evaluation returned mocked=true indicating key missing
+                const keyMissing = evaluations.some(ev => ev.mocked && ev.reasoning.includes("API key is missing"));
+                document.getElementById('api-warning').style.display = keyMissing ? 'flex' : 'none';
+
+                renderEvaluationsList();
+                renderCharts();
+            } catch (err) {
+                console.error("Error fetching evaluations:", err);
+            }
+        }
+
+        // Fetch metrics from backend
+        async function fetchMetrics() {
+            try {
+                const response = await fetch(`${API_HOST}/api/metrics`);
+                if (!response.ok) throw new Error("API return code: " + response.status);
+                const metrics = await response.json();
+
+                // Update UI Counters
+                document.getElementById('metric-total').innerText = metrics.total_queries;
+                document.getElementById('metric-health').innerText = `${metrics.health_rate.toFixed(1)}%`;
+                document.getElementById('metric-flagged').innerText = metrics.flagged_count;
+                document.getElementById('metric-accuracy').innerText = `${(metrics.avg_accuracy * 100).toFixed(0)}%`;
+            } catch (err) {
+                console.error("Error fetching metrics:", err);
+            }
+        }
+
+        // Load Preset Template into Form
+        function loadTemplate(key, btnElement) {
+            const template = templates[key];
+            if (!template) return;
+
+            document.getElementById('docs').value = template.docs;
+            document.getElementById('query').value = template.query;
+            document.getElementById('agent_response').value = template.response;
+
+            // Update character counters
+            updateCharCount('docs');
+            updateCharCount('query');
+            updateCharCount('agent_response');
+
+            // Set active class on button
+            document.querySelectorAll('.template-btn').forEach(btn => btn.classList.remove('active'));
+            btnElement.classList.add('active');
+        }
+
+        // Submit log simulation
+        async function submitEvaluation() {
+            const btn = document.getElementById('run-btn');
+            const wrapper = document.querySelector('.btn-evaluate-wrapper');
+            
+            const payload = {
+                docs: document.getElementById('docs').value,
+                query: document.getElementById('query').value,
+                agent_response: document.getElementById('agent_response').value
+            };
+
+            btn.disabled = true;
+            btn.innerHTML = `
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s infinite linear;"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>
+                Auditing via Gemini...
+            `;
+            wrapper.classList.add('scanning');
+
+            try {
+                const response = await fetch(`${API_HOST}/api/evaluate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await response.json();
+                if (data.error) throw new Error(data.error);
+
+                // Re-fetch everything
+                await fetchEvaluations();
+                await fetchMetrics();
+                
+                // Add minor custom animation on first feed child
+                setTimeout(() => {
+                    const firstCard = document.querySelector('.feed-list .log-card');
+                    if (firstCard) {
+                        firstCard.style.transform = 'scale(1.02)';
+                        setTimeout(() => firstCard.style.transform = 'scale(1)', 200);
+                    }
+                }, 50);
+
+            } catch (error) {
+                alert("Backend Evaluation Error:\n" + error.message + "\n\nMake sure backend.py is running on http://localhost:5000");
+                console.error(error);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+                    Run Audit Pipeline
+                `;
+                wrapper.classList.remove('scanning');
+            }
+        }
+
+        // Render logs list
+        function renderEvaluationsList() {
+            const feedContainer = document.getElementById('feed-list');
+            feedContainer.innerHTML = '';
+
+            const searchVal = document.getElementById('feed-search').value.toLowerCase().trim();
+
+            // Filter evaluations list
+            const filtered = evaluations.filter(ev => {
+                const matchesFilter = currentFilter === 'all' || ev.status.toLowerCase() === currentFilter;
+                const matchesSearch = !searchVal || 
+                                     ev.query.toLowerCase().includes(searchVal) || 
+                                     ev.agent_response.toLowerCase().includes(searchVal) ||
+                                     ev.issue.toLowerCase().includes(searchVal);
+                return matchesFilter && matchesSearch;
+            });
+
+            if (filtered.length === 0) {
+                feedContainer.innerHTML = `
+                    <div class="empty-state">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <span>No records found matching filters.</span>
+                    </div>
+                `;
+                return;
+            }
+
+            filtered.forEach((ev) => {
+                const card = document.createElement('div');
+                card.className = 'log-card';
+                card.id = `card-${ev.id}`;
+                
+                // Colors and classes depending on status
+                const badgeClass = `badge-${ev.status.toLowerCase()}`;
+                const color = ev.score >= 0.9 ? 'var(--success)' : (ev.score >= 0.6 ? 'var(--warning)' : 'var(--danger)');
+                
+                // Date formatting
+                const timeStr = new Date(ev.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+
+                card.innerHTML = `
+                    <div class="log-card-header" onclick="toggleCard('${ev.id}')">
+                        <div class="log-card-summary">
+                            <div class="log-id-row">
+                                <span>${ev.id}</span>
+                                <span>•</span>
+                                <span>${timeStr}</span>
+                                ${ev.mocked ? '<span class="api-badge" style="zoom: 0.85;">SIMULATION</span>' : '<span class="api-badge" style="zoom: 0.85; background: rgba(99, 102, 241, 0.1); border-color: rgba(99, 102, 241, 0.2)">GEMINI</span>'}
+                            </div>
+                            <div class="log-query-preview"><strong>Query:</strong> ${escapeHtml(ev.query)}</div>
+                        </div>
+                        <span class="badge ${badgeClass}">${ev.status}</span>
+                        <div class="score-indicator">
+                            <span class="score-num" style="color: ${color};">${(ev.score * 100).toFixed(0)}%</span>
+                            <div class="score-bar-mini">
+                                <div class="score-bar-fill" style="width: ${ev.score * 100}%; background-color: ${color};"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="log-card-body">
+                        <div class="log-details-padding">
+                            
+                            <div class="details-grid">
+                                <div class="detail-section">
+                                    <span class="detail-label">User Query</span>
+                                    <div class="detail-box">${escapeHtml(ev.query)}</div>
+                                </div>
+                                
+                                <div class="detail-section">
+                                    <span class="detail-label">Agent Response</span>
+                                    <div class="detail-box code">${escapeHtml(ev.agent_response)}</div>
+                                </div>
+
+                                <div class="detail-section">
+                                    <span class="detail-label">Documentation Context (Ground Truth)</span>
+                                    <div class="detail-box monospace" style="font-size: 0.8rem; background: rgba(255,255,255,0.01); color: var(--text-muted);">${escapeHtml(ev.docs)}</div>
+                                </div>
+
+                                ${ev.status !== 'Verified' ? `
+                                <div class="detail-section">
+                                    <span class="detail-label" style="color: var(--danger);">Audited Issue</span>
+                                    <div class="detail-box audited-issue">
+                                        <strong>↳ ${escapeHtml(ev.issue)}</strong>
+                                    </div>
+                                </div>
+                                ` : ''}
+
+                                <div class="detail-section">
+                                    <span class="detail-label" style="color: var(--primary);">Gemini Auditor Reasoning</span>
+                                    <div class="detail-box audited-reasoning">${escapeHtml(ev.reasoning)}</div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                `;
+
+                feedContainer.appendChild(card);
+            });
+        }
+
+        // Toggle Expand Collapsible card details
+        function toggleCard(id) {
+            const card = document.getElementById(`card-${id}`);
+            if (card) {
+                const wasExpanded = card.classList.contains('expanded');
+                // collapse all other cards optionally
+                document.querySelectorAll('.log-card').forEach(c => c.classList.remove('expanded'));
+                
+                if (!wasExpanded) {
+                    card.classList.add('expanded');
+                }
+            }
+        }
+
+        // Filter and Search Action
+        function filterLogs() {
+            renderEvaluationsList();
+        }
+
+        // Filter status tab selection
+        function setFeedFilter(status) {
+            currentFilter = status;
+            document.querySelectorAll('.filter-tab').forEach(tab => tab.classList.remove('active'));
+            document.getElementById(`filter-${status}`).classList.add('active');
+            renderEvaluationsList();
+        }
+
+        // Escapes HTML tags to prevent injections in dashboard layout
+        function escapeHtml(text) {
+            if (!text) return '';
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+        }
+
+        // Render metrics charts using Chart.js
+        function renderCharts() {
+            // Count metrics
+            const verified = evaluations.filter(ev => ev.status === 'Verified').length;
+            const review = evaluations.filter(ev => ev.status === 'Review').length;
+            const flagged = evaluations.filter(ev => ev.status === 'Flagged').length;
+
+            // 1. Doughnut Chart: Status distribution
+            const doughnutCtx = document.getElementById('chart-doughnut').getContext('2d');
+            if (doughnutChart) {
+                doughnutChart.destroy();
+            }
+            doughnutChart = new Chart(doughnutCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Verified', 'Review', 'Flagged'],
+                    datasets: [{
+                        data: [verified, review, flagged],
+                        backgroundColor: ['#14b8a6', '#f59e0b', '#f43f5e'],
+                        borderWidth: 2,
+                        borderColor: '#0b1120',
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'bottom',
+                            labels: {
+                                color: '#94a3b8',
+                                boxWidth: 10,
+                                font: { size: 10, family: 'Outfit' }
+                            }
+                        }
+                    },
+                    cutout: '70%'
+                }
+            });
+
+            // 2. Line Chart: Accuracy history trend (last 10 elements)
+            const history = [...evaluations].reverse().slice(-10);
+            const lineLabels = history.map((ev, idx) => `#${ev.id.replace('req_', '')}`);
+            const lineData = history.map(ev => ev.score * 100);
+
+            const lineCtx = document.getElementById('chart-line').getContext('2d');
+            if (lineChart) {
+                lineChart.destroy();
+            }
+            lineChart = new Chart(lineCtx, {
+                type: 'line',
+                data: {
+                    labels: lineLabels.length > 0 ? lineLabels : ['No Data'],
+                    datasets: [{
+                        label: 'Accuracy %',
+                        data: lineData.length > 0 ? lineData : [0],
+                        borderColor: '#6366f1',
+                        borderWidth: 2.5,
+                        backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        pointBackgroundColor: '#818cf8',
+                        pointBorderColor: '#0b1120',
+                        pointBorderWidth: 1.5,
+                        pointRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#64748b', font: { size: 9, family: 'Outfit' } }
+                        },
+                        y: {
+                            min: 0,
+                            max: 100,
+                            grid: { color: 'rgba(255, 255, 255, 0.04)' },
+                            ticks: { color: '#64748b', font: { size: 9, family: 'Outfit' } }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+        }
+    </script>
+    
+    <style>
+        /* Rotation keyframes for spinner */
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</body>
+</html>
